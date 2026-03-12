@@ -1,0 +1,19 @@
+# Terraform state files
+*.tfstate
+*.tfstate.backup
+*.tfvars
+
+# Terraform crash logs
+crash.log
+
+# .terraform directories
+.terraform/
+
+# AWS CLI credentials
+*.pem
+*.key
+*.env
+
+# OS files
+.DS_Store
+*.swp

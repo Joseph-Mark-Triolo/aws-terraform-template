@@ -1,0 +1,126 @@
+name: AWS Terraform CI/CD Pipeline
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform-plan:
+    env:
+      ENV: dev
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Check Terraform Format
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=tfstate-bucket-name-${{ env.ENV }}" \
+            -backend-config="key=${{env.ENV}}/tfstate-object-key" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="dynamodb_table=terraform-lock-name"
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Run Terraform Security Scan # tfsec scan for terraform code vulnerabilities
+        run: | # --soft-fail argument so that it does not break action, remove this if you want it to break action
+          curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+          tfsec . --soft-fail 
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=environments/dev/dev.tfvars
+  
+  terraform-apply-dev:
+    environment: dev
+    env:
+      ENV: dev
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=tfstate-bucket-name-${{ env.ENV }}" \
+            -backend-config="key=${{env.ENV}}/tfstate-object-key" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="dynamodb_table=terraform-lock-name"
+
+      - name: Terraform Apply
+        run: terraform apply -var-file=environments/dev/dev.tfvars -auto-approve
+
+  terraform-apply-prod: # Make sure to add manual approval gate in Github Environments
+    environment: prod
+    env:
+      ENV: prod
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PROD_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=tfstate-bucket-name-${{ env.ENV }}" \
+            -backend-config="key=${{env.ENV}}/tfstate-object-key" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="dynamodb_table=terraform-lock-name"
+
+      - name: Run Terraform Security Scan # tfsec scan for terraform code vulnerabilities
+        run: | # --soft-fail argument so that it does not break action, remove this if you want it to break action
+          curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+          tfsec . --soft-fail 
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=environments/prod/prod.tfvars
+
+      - name: Terraform Apply      
+        run: terraform apply -var-file=environments/prod/prod.tfvars -auto-approve
