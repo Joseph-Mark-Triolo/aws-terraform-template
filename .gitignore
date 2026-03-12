@@ -1,7 +1,7 @@
 # Terraform state files
 *.tfstate
 *.tfstate.backup
-*.tfvars
+#*.tfvars   have this line in when using a working repo 
 
 # Terraform crash logs
 crash.log
